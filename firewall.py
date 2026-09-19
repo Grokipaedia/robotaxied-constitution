@@ -34,12 +34,16 @@ ACTOR_TIERS = {
     "vehicle": "vehicle_operational_authority",
     "remote_operator": "remote_operator_authority",
     "emergency_authority": "emergency_authority",
+    "passenger": "passenger_intent",
 }
 
 
 @dataclass
 class IntentEnvelope:
-    """What the passenger actually asked for, made explicit and checkable."""
+    """What the passenger actually asked for, made explicit and checkable.
+    This isn't frozen at trip start -- a passenger action authorized mid-trip
+    (e.g. request_new_destination) updates it, because the passenger is the
+    one actor here who's allowed to change their own intent."""
     destination: str
     allow_normal_roads_only: bool = True
     forbid_restricted_areas: bool = True
@@ -132,6 +136,8 @@ class ConstitutionFirewall:
             decision = self._evaluate_remote_operator(action)
         elif action.actor == "emergency_authority":
             decision = self._evaluate_emergency_authority(action)
+        elif action.actor == "passenger":
+            decision = self._evaluate_passenger(action)
         elif action.actor == "vehicle":
             decision = self._evaluate_vehicle(action)
         else:
@@ -175,6 +181,39 @@ class ConstitutionFirewall:
         return Decision(
             action, DENY, "default_deny",
             f"'{action.action_type}' is not an explicitly delegated emergency authority; denied by default."
+        )
+
+    def _evaluate_passenger(self, action: Action) -> Decision:
+        """The passenger isn't just the source of the original intent
+        envelope -- they're a real actor who can issue live requests, and
+        those requests outrank the vehicle's and remote operator's own
+        authority (per authority_hierarchy). A request that's granted can
+        actually update the envelope -- unlike the vehicle silently changing
+        its own destination, this is the rights-holder changing their own
+        mind."""
+        c = self.constitution
+        if action.action_type in c["passenger_may_not"]:
+            return Decision(
+                action, DENY, "passenger_may_not",
+                f"Passenger request '{action.action_type}' is outside what even the passenger can authorize -- "
+                "some things (like overriding an immutable constraint) aren't anyone's to grant."
+            )
+        if action.action_type == "request_new_destination":
+            old_destination = self.envelope.destination
+            self.envelope.destination = action.detail or self.envelope.destination
+            return Decision(
+                action, ALLOW, "passenger_may",
+                f"Passenger authorized a destination change ({old_destination!r} -> {self.envelope.destination!r}). "
+                "This is the one destination change in the whole system that doesn't need anyone else's permission."
+            )
+        if action.action_type in c["passenger_may"]:
+            return Decision(
+                action, ALLOW, "passenger_may",
+                f"Passenger request '{action.action_type}' is within what the passenger may authorize."
+            )
+        return Decision(
+            action, DENY, "default_deny",
+            f"'{action.action_type}' is not an explicitly granted passenger authority; denied by default."
         )
 
     def _evaluate_vehicle(self, action: Action) -> Decision:
@@ -305,14 +344,19 @@ class ConstitutionFirewall:
         every millisecond -- plus a hash over the full record, so the
         vehicle can hand over a machine-verifiable statement of what it was
         authorized to do and what actually happened, not just a claim."""
-        destination_changed = any(
+        destination_changed_without_authorization = any(
             d.action.action_type == "silently_change_destination" and d.result == ALLOW
             for d in self.log
         )
+        passenger_destination_changes = [
+            d for d in self.log if d.action.action_type == "request_new_destination" and d.result == ALLOW
+        ]
         unscheduled_stops = [d for d in self.log if d.action.action_type == "stop_for_safety" and d.result == ALLOW]
         route_deviations = [d for d in self.log if d.action.action_type == "choose_route" and d.action.reason_category]
         remote_requests = [d for d in self.log if d.action.actor == "remote_operator"]
         blocked_remote = [d for d in remote_requests if d.result == DENY]
+        passenger_requests = [d for d in self.log if d.action.actor == "passenger"]
+        passenger_blocked = [d for d in passenger_requests if d.result == DENY]
         emergency_actions = [d for d in self.log if d.action.actor == "emergency_authority" and d.result == ALLOW]
         emergency_blocked = [d for d in self.log if d.action.actor == "emergency_authority" and d.result == DENY]
         # Only the vehicle's OWN prohibited actions (or an immutable-constraint
@@ -332,12 +376,19 @@ class ConstitutionFirewall:
             "trip": trip_label,
             "constitution_version": self.constitution.get("constitution_version", "unknown"),
             "authority_hierarchy": self.constitution.get("authority_hierarchy", []),
-            "destination_changed": destination_changed,
+            "destination_changed_without_authorization": destination_changed_without_authorization,
+            "destination_changed_by_passenger": [
+                {"new_destination": d.action.detail} for d in passenger_destination_changes
+            ],
             "unscheduled_stops": [{"reason": d.action.reason_category} for d in unscheduled_stops],
             "route_deviations": [{"reason": d.action.reason_category} for d in route_deviations],
             "remote_assistance_requests": len(remote_requests),
             "remote_assistance_blocked": [
                 {"command": d.action.action_type, "reason": d.explanation} for d in blocked_remote
+            ],
+            "passenger_requests": len(passenger_requests),
+            "passenger_requests_blocked": [
+                {"command": d.action.action_type, "reason": d.explanation} for d in passenger_blocked
             ],
             "emergency_actions": [
                 {"command": d.action.action_type} for d in emergency_actions
