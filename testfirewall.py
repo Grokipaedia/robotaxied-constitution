@@ -1,0 +1,129 @@
+import os
+import unittest
+
+from firewall import ConstitutionFirewall, IntentEnvelope, Action, ALLOW, DENY, ESCALATE
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+CONSTITUTION_PATH = os.path.join(HERE, "constitution.json")
+
+
+def new_firewall():
+    return ConstitutionFirewall(CONSTITUTION_PATH, IntentEnvelope(destination="Airport"))
+
+
+class TestVehicleActions(unittest.TestCase):
+    def test_normal_route_choice_allowed(self):
+        fw = new_firewall()
+        d = fw.evaluate(Action(actor="vehicle", action_type="choose_route"))
+        self.assertEqual(d.result, ALLOW)
+
+    def test_obstacle_avoidance_reroute_allowed(self):
+        fw = new_firewall()
+        d = fw.evaluate(Action(actor="vehicle", action_type="choose_route", reason_category="obstacle_avoidance"))
+        self.assertEqual(d.result, ALLOW)
+
+    def test_emergency_unscheduled_stop_allowed(self):
+        fw = new_firewall()
+        d = fw.evaluate(Action(actor="vehicle", action_type="stop_for_safety", reason_category="emergency"))
+        self.assertEqual(d.result, ALLOW)
+
+    def test_unjustified_unscheduled_stop_denied(self):
+        fw = new_firewall()
+        d = fw.evaluate(Action(actor="vehicle", action_type="stop_for_safety", reason_category="driver_wanted_coffee"))
+        self.assertEqual(d.result, DENY)
+        self.assertIn("intent_envelope", d.policy_ref)
+
+    def test_silent_destination_change_denied(self):
+        fw = new_firewall()
+        d = fw.evaluate(Action(actor="vehicle", action_type="silently_change_destination"))
+        self.assertEqual(d.result, DENY)
+
+    def test_exceeding_operating_envelope_denied(self):
+        fw = new_firewall()
+        d = fw.evaluate(Action(actor="vehicle", action_type="exceed_operating_envelope"))
+        self.assertEqual(d.result, DENY)
+        self.assertEqual(d.policy_ref, "vehicle_may_not")
+
+    def test_unlisted_vehicle_action_denied_by_default(self):
+        fw = new_firewall()
+        d = fw.evaluate(Action(actor="vehicle", action_type="do_something_never_specified"))
+        self.assertEqual(d.result, DENY)
+        self.assertEqual(d.policy_ref, "default_deny")
+
+
+class TestRemoteOperatorActions(unittest.TestCase):
+    def test_status_request_allowed(self):
+        fw = new_firewall()
+        d = fw.evaluate(Action(actor="remote_operator", action_type="request_status"))
+        self.assertEqual(d.result, ALLOW)
+
+    def test_authorized_detour_allowed(self):
+        fw = new_firewall()
+        d = fw.evaluate(Action(actor="remote_operator", action_type="authorize_detour"))
+        self.assertEqual(d.result, ALLOW)
+
+    def test_ignore_restriction_command_denied(self):
+        """The scenario from the design doc: remote operator says 'ignore the
+        restriction and continue' -- must be blocked even though a human issued it."""
+        fw = new_firewall()
+        d = fw.evaluate(Action(actor="remote_operator", action_type="instruct_ignore_restriction"))
+        self.assertEqual(d.result, DENY)
+        self.assertEqual(d.policy_ref, "remote_operator_may_not")
+
+    def test_remote_operator_cannot_change_destination_without_consent(self):
+        fw = new_firewall()
+        d = fw.evaluate(Action(actor="remote_operator", action_type="change_destination_without_passenger_consent"))
+        self.assertEqual(d.result, DENY)
+
+    def test_unlisted_remote_action_denied_by_default(self):
+        fw = new_firewall()
+        d = fw.evaluate(Action(actor="remote_operator", action_type="do_something_never_specified"))
+        self.assertEqual(d.result, DENY)
+        self.assertEqual(d.policy_ref, "default_deny")
+
+
+class TestImmutableConstraintsAndEscalation(unittest.TestCase):
+    def test_immutable_override_denied_regardless_of_actor(self):
+        fw = new_firewall()
+        d1 = fw.evaluate(Action(actor="vehicle", action_type="override_immutable_constraint"))
+        d2 = fw.evaluate(Action(actor="remote_operator", action_type="override_immutable_constraint"))
+        self.assertEqual(d1.result, DENY)
+        self.assertEqual(d2.result, DENY)
+        self.assertEqual(d1.policy_ref, "immutable_constraints")
+        self.assertEqual(d2.policy_ref, "immutable_constraints")
+
+    def test_escalation_trigger_routes_to_escalate_not_allow_or_deny(self):
+        fw = new_firewall()
+        d = fw.evaluate(Action(actor="vehicle", action_type="ambiguous_safety_tradeoff"))
+        self.assertEqual(d.result, ESCALATE)
+
+
+class TestJourneyReceipt(unittest.TestCase):
+    def test_receipt_matches_design_doc_scenario(self):
+        fw = new_firewall()
+        fw.evaluate(Action(actor="vehicle", action_type="choose_route"))
+        fw.evaluate(Action(actor="vehicle", action_type="choose_route", reason_category="obstacle_avoidance"))
+        fw.evaluate(Action(actor="remote_operator", action_type="instruct_ignore_restriction"))
+        fw.evaluate(Action(actor="vehicle", action_type="stop_for_safety", reason_category="emergency"))
+
+        receipt = fw.journey_receipt("Home -> Airport")
+        self.assertFalse(receipt["destination_changed"])
+        self.assertEqual(len(receipt["unscheduled_stops"]), 1)
+        self.assertEqual(receipt["unscheduled_stops"][0]["reason"], "emergency")
+        self.assertEqual(len(receipt["route_deviations"]), 1)
+        self.assertEqual(receipt["remote_assistance_requests"], 1)
+        self.assertEqual(len(receipt["remote_assistance_blocked"]), 1)
+        self.assertEqual(receipt["safety_policy_violations"], 0)
+        self.assertEqual(receipt["intent_violations"], 0)
+        self.assertTrue(receipt["completed_within_authorized_envelope"])
+
+    def test_receipt_flags_violation_when_present(self):
+        fw = new_firewall()
+        fw.evaluate(Action(actor="vehicle", action_type="stop_for_safety", reason_category="driver_wanted_coffee"))
+        receipt = fw.journey_receipt("Home -> Airport")
+        self.assertEqual(receipt["intent_violations"], 1)
+        self.assertFalse(receipt["completed_within_authorized_envelope"])
+
+
+if __name__ == "__main__":
+    unittest.main()
