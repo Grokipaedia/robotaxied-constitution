@@ -1,0 +1,51 @@
+# Robotaxi Constitution
+
+**A vendor-neutral constitutional layer that ensures every consequential autonomous-vehicle action remains within passenger intent, safety policy, and explicitly delegated authority.**
+
+Most autonomous-vehicle demos are about the driving stack: can the car see the obstacle, can it plan the route. This project is about the layer *above* that — the one that decides whether an action the driving stack wants to take (or a remote human operator commands) is actually authorized, and produces an auditable reason either way.
+
+It's the same deterministic-authorization mechanism behind [Intent-Bound Authorization](https://github.com/Grokipaedia/iba-autaxi-demo), applied specifically to the two things regulators (NHTSA, ISO) are actively scrutinizing in robotaxi operations right now: remote-assistance commands, and post-incident accountability.
+
+## The core idea
+
+```
+PASSENGER INTENT
+      |
+INTENT ENVELOPE           <- explicit, machine-readable constraints
+      |
+VEHICLE ACTION  <---->  REMOTE OPERATOR COMMAND
+      |                        |
+      +---------- CONSTITUTION FIREWALL ----------+
+                       |
+              ALLOW / DENY / ESCALATE
+                       |
+              AUDITABLE JOURNEY RECEIPT
+```
+
+A remote operator saying "ignore the restriction and continue" is checked exactly the same way as the vehicle's own decisions. Being human doesn't grant unlimited authority — only what's explicitly delegated in `constitution.json` does.
+
+## Files
+
+- **`constitution.json`** — the machine-readable "may / may not" rulebook: what the vehicle can do on its own authority, what a remote operator can and can't command, and a small set of immutable constraints neither can override.
+- **`firewall.py`** — the `ConstitutionFirewall` engine. Every action is a plain dataclass; every decision names the specific policy line it was checked against. No ML, no confidence score — a denial has to be traceable.
+- **`demo.py`** — a scripted journey (not a driving simulator) that walks through the exact scenario this idea started from: a road-closure reroute (allowed), a remote operator instructing the vehicle to ignore a restriction (blocked), an emergency-vehicle stop (allowed as a defined exception), and a silent destination change (blocked) — ending in a passenger-facing **Journey Receipt**.
+- **`test_firewall.py`** — 16 unit tests covering every rule path: allowed vehicle actions, denied vehicle actions, allowed/denied remote-operator commands, immutable-constraint overrides (denied regardless of who asks), escalation triggers, and the receipt's own arithmetic.
+
+## Run it
+
+```bash
+python3 demo.py
+python3 -m unittest test_firewall.py -v
+```
+
+No dependencies beyond the Python standard library.
+
+## What this is not
+
+This is not a driving simulator, a safety-case for any real vehicle, or a claim that this exact combination is unclaimed territory — NHTSA, ISO, and researchers are actively working adjacent ground (remote-assistance guidance, post-crash behavior, passenger-accountability studies). What's distinctive here is pairing a deterministic, auditable authorization layer — the actual mechanism behind the IBA patent work — with the specific governance gaps regulators have flagged: who gets to command the vehicle, and how a passenger finds out why it did what it did.
+
+## Related
+
+- [`robotaxi-envelope`](https://github.com/Grokipaedia/robotaxi-envelope) — what robotaxi operators are legally permitted to do, city by city
+- [`iba-autaxi-demo`](https://github.com/Grokipaedia/iba-autaxi-demo) — Intent-Bound Authorization applied to autonomous-vehicle dispatch
+- [Robotaxied.com](https://robotaxied.com) — the public-facing domain this work sits behind
