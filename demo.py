@@ -4,6 +4,10 @@ demo.py -- a tiny simulator. Not a driving simulator: nothing here models
 steering or perception. It models the governance layer that sits above the
 driving stack -- the thing this project is actually about.
 
+v2 adds the harder scenario: two legitimate authorities giving conflicting
+instructions at the same moment, and the arbitration layer that decides
+whose wins, plus a hashable Journey Receipt at the end.
+
 Run it:
     python3 demo.py
 """
@@ -27,8 +31,22 @@ def show(decision):
     print(f"      {decision.explanation}")
 
 
+def show_conflict(result):
+    print(f"  DECISION POINT: {result.decision_point}")
+    for d in result.decisions:
+        icon = {"ALLOW": "✓", "DENY": "✕", "ESCALATE": "?"}[d.result]
+        print(f"    [{icon}] {d.action.actor} proposes: {d.action.action_type}  -> {d.result} [{d.policy_ref}]")
+    if result.escalated:
+        print("  RESULT: CONFLICT -- ESCALATED (tied authority, not silently broken)")
+    elif result.conflict:
+        print(f"  RESULT: CONFLICT -- APPLIED: {result.applied.action.actor} -> {result.applied.action.action_type}")
+    else:
+        print("  RESULT: no conflict")
+    print(f"  WHY: {result.explanation}")
+
+
 def main():
-    print("ROBOTAXI CONSTITUTION -- governance-layer demo")
+    print("ROBOTAXI CONSTITUTION v2 -- governance-layer demo")
     print("Not a driving simulator. This models the layer ABOVE the driving stack.\n")
 
     envelope = IntentEnvelope(destination="Airport")
@@ -71,9 +89,36 @@ def main():
                              detail="Rerouted to a different address without asking")))
 
     line()
-    receipt = fw.journey_receipt("Home -> Airport")
-    print("\nJOURNEY RECEIPT")
-    print(json.dumps(receipt, indent=2))
+    print("8. AUTHORITY CONFLICT: two legitimate actors disagree on the same moment")
+    print("   Remote operator: \"Continue.\"   Emergency authority: \"Stop.\"")
+    conflict = fw.resolve_conflict(
+        "current_maneuver_at_intersection",
+        [
+            Action(actor="remote_operator", action_type="authorize_continue"),
+            Action(actor="emergency_authority", action_type="command_stop"),
+        ],
+    )
+    show_conflict(conflict)
+
+    line()
+    print("9. AUTHORITY CONFLICT, tied ranks: two remote operators disagree with themselves")
+    print("   (illustrates that a tie escalates rather than being silently broken)")
+    conflict2 = fw.resolve_conflict(
+        "second_operator_disagreement",
+        [
+            Action(actor="remote_operator", action_type="authorize_continue"),
+            Action(actor="remote_operator", action_type="authorize_detour"),
+        ],
+    )
+    show_conflict(conflict2)
+
+    line()
+    receipt = fw.journey_receipt(trip_id="TRIP-2026-0914-0001", trip_label="Home -> Airport")
+    print("\nJOURNEY RECEIPT (abridged -- full_decision_log omitted here for length)")
+    abridged = {k: v for k, v in receipt.items() if k != "full_decision_log"}
+    print(json.dumps(abridged, indent=2))
+    print(f"\nReceipt hash: {receipt['receipt_hash']}")
+    print("(Recomputing the hash from the same record independently confirms it hasn't been altered.)")
 
 
 if __name__ == "__main__":
