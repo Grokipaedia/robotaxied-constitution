@@ -1,0 +1,52 @@
+{
+  "_comment": "Machine-readable Robotaxi Constitution. Every consequential action taken by the vehicle or a remote operator is checked against this before it is authorized. This is deliberately a plain, hand-editable policy document, not a trained model -- the whole point is that a denial can be traced to a specific line here.",
+
+  "vehicle_may": [
+    "transport_to_destination",
+    "choose_route",
+    "avoid_hazard",
+    "stop_for_safety",
+    "request_remote_assistance",
+    "summon_emergency_services"
+  ],
+
+  "vehicle_may_not": [
+    "exceed_operating_envelope",
+    "silently_change_destination",
+    "accept_unauthorized_commands",
+    "continue_after_critical_failure",
+    "override_immutable_constraint",
+    "conflict_with_safety_policy"
+  ],
+
+  "remote_operator_may": [
+    "provide_guidance",
+    "authorize_detour",
+    "request_status"
+  ],
+
+  "remote_operator_may_not": [
+    "override_immutable_constraint",
+    "instruct_ignore_restriction",
+    "change_destination_without_passenger_consent",
+    "disable_safety_system"
+  ],
+
+  "immutable_constraints": [
+    "must_not_exceed_defined_safety_constraints",
+    "must_not_enter_restricted_area",
+    "must_not_make_unscheduled_stop_except_safety_or_emergency",
+    "must_not_terminate_without_justification"
+  ],
+
+  "unscheduled_stop_exceptions": [
+    "safety",
+    "emergency"
+  ],
+
+  "escalation_triggers": [
+    "ambiguous_safety_tradeoff",
+    "conflicting_authority_claims",
+    "unresolvable_within_policy"
+  ]
+}
