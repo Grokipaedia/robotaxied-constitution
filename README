@@ -1,35 +1,64 @@
 # Robotaxied Constitution
 
-**A vendor-neutral constitutional layer that ensures every consequential autonomous-vehicle action remains within passenger intent, safety policy, and explicitly delegated authority.**
+**A vendor-neutral constitutional layer that ensures every consequential autonomous-vehicle action remains within passenger intent, safety policy, and explicitly delegated authority — including when two legitimate authorities disagree.**
 
-Most autonomous-vehicle demos are about the driving stack: can the car see the obstacle, can it plan the route. This project is about the layer *above* that — the one that decides whether an action the driving stack wants to take (or a remote human operator commands) is actually authorized, and produces an auditable reason either way.
+Most autonomous-vehicle demos are about the driving stack: can the car see the obstacle, can it plan the route. This project is about the layer *above* that — the one that decides whether a proposed action is actually authorized, arbitrates when two people (or systems) with real authority give conflicting orders, and produces an auditable, hashable record either way.
 
-It's the same deterministic-authorization mechanism behind [Intent-Bound Authorization](https://github.com/Grokipaedia/iba-autaxi-demo), applied specifically to the two things regulators (NHTSA, ISO) are actively scrutinizing in robotaxi operations right now: remote-assistance commands, and post-incident accountability.
+It's the same deterministic-authorization mechanism behind [Intent-Bound Authorization](https://github.com/Grokipaedia/iba-autaxi-demo), applied specifically to the governance gaps regulators (NHTSA, ISO) are actively scrutinizing in robotaxi operations right now: remote-assistance commands, emergency-response authority, and post-incident accountability.
 
-## The core idea
+## v2: authority arbitration
+
+v1 answered "is this one action authorized?" v2 answers the harder question: **who has authority over a driverless vehicle during an emergency, and what happens when two legitimate authorities give conflicting instructions?**
 
 ```
-PASSENGER INTENT
-      |
-INTENT ENVELOPE           <- explicit, machine-readable constraints
-      |
-VEHICLE ACTION  <---->  REMOTE OPERATOR COMMAND
-      |                        |
-      +---------- CONSTITUTION FIREWALL ----------+
-                       |
-              ALLOW / DENY / ESCALATE
-                       |
-              AUDITABLE JOURNEY RECEIPT
+                     CONSTITUTION
+                          |
+            +-------------+-------------+
+            |             |             |
+        VEHICLE        REMOTE       EMERGENCY
+        SYSTEM        OPERATOR      AUTHORITY
+            \             |             /
+             \            |            /
+              ---- CONSTITUTION FIREWALL ----
+                          |
+                 ALLOW / DENY / ESCALATE
+                          |
+              (if >1 authorized for the same
+               decision point: ARBITRATE)
+                          |
+                 AUTHORITY_HIERARCHY decides
+               (a tie escalates -- never silently
+                        broken)
+                          |
+              HASHABLE JOURNEY RECEIPT
 ```
 
-A remote operator saying "ignore the restriction and continue" is checked exactly the same way as the vehicle's own decisions. Being human doesn't grant unlimited authority — only what's explicitly delegated in `constitution.json` does.
+Example, straight from the demo:
+
+```
+REMOTE OPERATOR:  "Continue."
+EMERGENCY AUTHORITY: "Stop."
+        |
+CONSTITUTION FIREWALL: both are independently within their own
+authority -- so this is a genuine conflict, not a simple denial.
+        |
+AUTHORITY_HIERARCHY: emergency_authority outranks remote_operator
+        |
+APPLIED: command_stop
+```
+
+The hierarchy (`emergency_authority` > `passenger_intent` > `vehicle_operational_authority` > `remote_operator_authority`, with immutable safety constraints above all of them) is **read from `constitution.json`, not hard-coded** — it's a policy choice, meant to be inspected and argued about, not a law of nature baked into the engine. And a tie in rank never resolves itself silently; it escalates to human review.
+
+## The core idea (v1, still true)
+
+A remote operator saying "ignore the restriction and continue" is checked exactly the same way as the vehicle's own decisions. Being human doesn't grant unlimited authority — only what's explicitly delegated in `constitution.json` does. That now applies to emergency authorities too: they outrank everyone else in the hierarchy, but they still can't override an immutable constraint, and an out-of-scope emergency command is denied just like an out-of-scope remote-operator one.
 
 ## Files
 
-- **`constitution.json`** — the machine-readable "may / may not" rulebook: what the vehicle can do on its own authority, what a remote operator can and can't command, and a small set of immutable constraints neither can override.
-- **`firewall.py`** — the `ConstitutionFirewall` engine. Every action is a plain dataclass; every decision names the specific policy line it was checked against. No ML, no confidence score — a denial has to be traceable.
-- **`demo.py`** — a scripted journey (not a driving simulator) that walks through the exact scenario this idea started from: a road-closure reroute (allowed), a remote operator instructing the vehicle to ignore a restriction (blocked), an emergency-vehicle stop (allowed as a defined exception), and a silent destination change (blocked) — ending in a passenger-facing **Journey Receipt**.
-- **`test_firewall.py`** — 16 unit tests covering every rule path: allowed vehicle actions, denied vehicle actions, allowed/denied remote-operator commands, immutable-constraint overrides (denied regardless of who asks), escalation triggers, and the receipt's own arithmetic.
+- **`constitution.json`** — the machine-readable rulebook: what each of the three actors (vehicle, remote operator, emergency authority) may and may not do on its own authority, the immutable constraints none of them can override, and the configurable `authority_hierarchy` used to arbitrate conflicts.
+- **`firewall.py`** — the `ConstitutionFirewall` engine. `evaluate()` checks one proposed action; `resolve_conflict()` takes several competing proposals for the same decision point, checks each on its own merits first, and only then consults rank — a tie escalates rather than being silently broken. `journey_receipt()` produces the passenger-facing summary plus a SHA-256 hash over the full record, so two parties holding the same receipt can independently confirm it wasn't altered.
+- **`demo.py`** — a scripted journey (not a driving simulator): a road-closure reroute (allowed), a remote operator told to ignore a restriction (blocked), an emergency stop (allowed as a defined exception), a silent destination change (blocked), a genuine authority conflict (emergency authority overrides remote operator), and a tied conflict (escalates) — ending in a hashed Journey Receipt.
+- **`test_firewall.py`** — 29 unit tests covering every rule path for all three actors, immutable-constraint overrides, escalation triggers, conflict arbitration (including the tie case and the "out-of-scope proposal loses on its own merits before rank ever matters" case), and the receipt's hash determinism.
 
 ## Run it
 
@@ -42,10 +71,11 @@ No dependencies beyond the Python standard library.
 
 ## What this is not
 
-This is not a driving simulator, a safety-case for any real vehicle, or a claim that this exact combination is unclaimed territory — NHTSA, ISO, and researchers are actively working adjacent ground (remote-assistance guidance, post-crash behavior, passenger-accountability studies). What's distinctive here is pairing a deterministic, auditable authorization layer — the actual mechanism behind the IBA patent work — with the specific governance gaps regulators have flagged: who gets to command the vehicle, and how a passenger finds out why it did what it did.
+This is not a driving simulator, a safety-case for any real vehicle, or a claim that machine-enforceable physical-world constitutions are unclaimed territory in general — adjacent work is already emerging (for example, Trust Robotics has published a draft "Humanoid Constitution" on machine-enforceable physical authority), and NHTSA, ISO, and researchers are actively working the surrounding ground (remote-assistance guidance, post-crash behavior, passenger-accountability studies). What's narrower and more specific here: a robotaxi-focused combination of passenger intent, delegated authority across three actor types, deterministic pre-action authorization, explicit conflict arbitration with a configurable hierarchy, and a cryptographically verifiable journey record.
 
 ## Related
 
-- [`robotaxi-envelope`](https://github.com/Grokipaedia/robotaxi-envelope) — what robotaxi operators are legally permitted to do, city by city
-- [`iba-autaxi-demo`](https://github.com/Grokipaedia/iba-autaxi-demo) — Intent-Bound Authorization applied to autonomous-vehicle dispatch
+- [`robotaxi-envelope`](https://github.com/Grokipaedia/robotaxi-envelope) — where may the autonomous vehicle operate, city by city
+- [`iba-autaxi-demo`](https://github.com/Grokipaedia/iba-autaxi-demo) — is a proposed action authorized by intent
+- **`robotaxied-constitution`** (this repo) — who has authority to authorize the action, especially when authorities conflict
 - [Robotaxied.com](https://robotaxied.com) — the public-facing domain this work sits behind
