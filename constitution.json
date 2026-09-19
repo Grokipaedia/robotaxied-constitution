@@ -1,7 +1,7 @@
 {
   "_comment": "Machine-readable Robotaxied Constitution. Every consequential action taken by the vehicle, a remote operator, or an emergency authority is checked against this before it is authorized. This is deliberately a plain, hand-editable policy document, not a trained model -- the whole point is that a denial (or a conflict resolution) can be traced to a specific line here.",
 
-  "constitution_version": "2.0.0",
+  "constitution_version": "2.1.0",
 
   "authority_hierarchy": [
     "immutable_safety_constraints",
@@ -15,11 +15,25 @@
   "vehicle_may": [
     "transport_to_destination",
     "choose_route",
+    "continue_to_destination",
     "avoid_hazard",
     "stop_for_safety",
     "request_remote_assistance",
     "summon_emergency_services"
   ],
+
+  "passenger_may": [
+    "request_new_destination",
+    "request_immediate_stop",
+    "request_route_preference"
+  ],
+
+  "passenger_may_not": [
+    "override_immutable_constraint",
+    "command_unsafe_maneuver",
+    "instruct_ignore_restriction"
+  ],
+  "_passenger_comment": "The passenger is a real actor in this model, not just a one-time input at trip start -- they set the original intent envelope, but they can also issue live requests mid-trip, and those requests outrank the vehicle's own operational authority and the remote operator's, per authority_hierarchy. This is the tier most robotaxi discourse skips: how much authority did the passenger actually keep after saying 'take me to the airport'?",
 
   "vehicle_may_not": [
     "exceed_operating_envelope",
