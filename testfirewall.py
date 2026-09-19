@@ -109,6 +109,47 @@ class TestEmergencyAuthorityActions(unittest.TestCase):
         self.assertEqual(d.policy_ref, "default_deny")
 
 
+class TestPassengerActions(unittest.TestCase):
+    def test_passenger_can_request_immediate_stop(self):
+        fw = new_firewall()
+        d = fw.evaluate(Action(actor="passenger", action_type="request_immediate_stop"))
+        self.assertEqual(d.result, ALLOW)
+
+    def test_passenger_destination_change_is_allowed_and_updates_envelope(self):
+        """Unlike the vehicle silently changing the destination (always
+        denied), a passenger requesting a change is legitimate -- it's their
+        own intent to change -- and actually updates the envelope."""
+        fw = new_firewall()
+        self.assertEqual(fw.envelope.destination, "Airport")
+        d = fw.evaluate(Action(actor="passenger", action_type="request_new_destination", detail="Downtown Hotel"))
+        self.assertEqual(d.result, ALLOW)
+        self.assertEqual(fw.envelope.destination, "Downtown Hotel")
+
+    def test_passenger_cannot_override_immutable_constraint(self):
+        fw = new_firewall()
+        d = fw.evaluate(Action(actor="passenger", action_type="override_immutable_constraint"))
+        self.assertEqual(d.result, DENY)
+        self.assertEqual(d.policy_ref, "immutable_constraints")
+
+    def test_passenger_cannot_instruct_ignore_restriction(self):
+        fw = new_firewall()
+        d = fw.evaluate(Action(actor="passenger", action_type="instruct_ignore_restriction"))
+        self.assertEqual(d.result, DENY)
+        self.assertEqual(d.policy_ref, "passenger_may_not")
+
+    def test_unlisted_passenger_action_denied_by_default(self):
+        fw = new_firewall()
+        d = fw.evaluate(Action(actor="passenger", action_type="do_something_never_specified"))
+        self.assertEqual(d.result, DENY)
+        self.assertEqual(d.policy_ref, "default_deny")
+
+    def test_passenger_outranks_vehicle_and_remote_operator(self):
+        fw = new_firewall()
+        self.assertLess(fw._rank("passenger"), fw._rank("vehicle"))
+        self.assertLess(fw._rank("passenger"), fw._rank("remote_operator"))
+        self.assertGreater(fw._rank("passenger"), fw._rank("emergency_authority"))
+
+
 class TestImmutableConstraintsAndEscalation(unittest.TestCase):
     def test_immutable_override_denied_regardless_of_actor(self):
         fw = new_firewall()
@@ -188,6 +229,43 @@ class TestAuthorityArbitration(unittest.TestCase):
         self.assertLess(fw._rank("vehicle"), fw._rank("remote_operator"))
         self.assertGreater(fw._rank("some_unlisted_actor"), fw._rank("remote_operator"))
 
+    def test_three_way_conflict_passenger_wins_over_vehicle_and_remote_operator(self):
+        """The scenario this project exists to demonstrate: the vehicle wants
+        to continue, the remote operator agrees, but the passenger -- who is
+        the one who actually granted the trip's authority in the first place
+        -- asks to stop. The passenger outranks both."""
+        fw = new_firewall()
+        result = fw.resolve_conflict(
+            "mid_trip_stop_decision",
+            [
+                Action(actor="vehicle", action_type="continue_to_destination"),
+                Action(actor="remote_operator", action_type="authorize_continue"),
+                Action(actor="passenger", action_type="request_immediate_stop"),
+            ],
+        )
+        self.assertTrue(result.conflict)
+        self.assertFalse(result.escalated)
+        self.assertEqual(result.applied.action.actor, "passenger")
+        self.assertEqual(len(result.overridden), 2)
+        overridden_actors = {d.action.actor for d in result.overridden}
+        self.assertEqual(overridden_actors, {"vehicle", "remote_operator"})
+
+    def test_emergency_authority_still_wins_over_passenger(self):
+        """Passenger authority is real, but it isn't the top of the
+        hierarchy -- an emergency authority still outranks the passenger."""
+        fw = new_firewall()
+        result = fw.resolve_conflict(
+            "intersection_during_emergency",
+            [
+                Action(actor="passenger", action_type="request_immediate_stop"),
+                Action(actor="emergency_authority", action_type="command_stop"),
+            ],
+        )
+        # Both propose stopping, so there's no operational disagreement here,
+        # but the ranking must still resolve to the emergency authority.
+        self.assertTrue(result.conflict)
+        self.assertEqual(result.applied.action.actor, "emergency_authority")
+
 
 class TestJourneyReceipt(unittest.TestCase):
     def test_receipt_matches_original_scenario(self):
@@ -198,7 +276,7 @@ class TestJourneyReceipt(unittest.TestCase):
         fw.evaluate(Action(actor="vehicle", action_type="stop_for_safety", reason_category="emergency"))
 
         receipt = fw.journey_receipt(trip_id="T1", trip_label="Home -> Airport")
-        self.assertFalse(receipt["destination_changed"])
+        self.assertFalse(receipt["destination_changed_without_authorization"])
         self.assertEqual(len(receipt["unscheduled_stops"]), 1)
         self.assertEqual(receipt["unscheduled_stops"][0]["reason"], "emergency")
         self.assertEqual(len(receipt["route_deviations"]), 1)
@@ -242,6 +320,16 @@ class TestJourneyReceipt(unittest.TestCase):
         receipt = fw.journey_receipt(trip_id="T4", trip_label="Home -> Airport")
         self.assertEqual(len(receipt["authority_conflicts_resolved"]), 1)
         self.assertEqual(receipt["authority_conflicts_resolved"][0]["applied"]["actor"], "emergency_authority")
+
+    def test_receipt_records_passenger_authorized_destination_change_separately_from_violations(self):
+        fw = new_firewall()
+        fw.evaluate(Action(actor="passenger", action_type="request_new_destination", detail="Downtown Hotel"))
+        receipt = fw.journey_receipt(trip_id="T5", trip_label="Home -> Airport")
+        self.assertFalse(receipt["destination_changed_without_authorization"])
+        self.assertEqual(len(receipt["destination_changed_by_passenger"]), 1)
+        self.assertEqual(receipt["destination_changed_by_passenger"][0]["new_destination"], "Downtown Hotel")
+        self.assertEqual(receipt["safety_policy_violations"], 0)
+        self.assertTrue(receipt["completed_within_authorized_envelope"])
 
     def test_hash_is_deterministic_for_identical_journeys(self):
         fw1 = new_firewall()
