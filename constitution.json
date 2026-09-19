@@ -1,5 +1,16 @@
 {
-  "_comment": "Machine-readable Robotaxi Constitution. Every consequential action taken by the vehicle or a remote operator is checked against this before it is authorized. This is deliberately a plain, hand-editable policy document, not a trained model -- the whole point is that a denial can be traced to a specific line here.",
+  "_comment": "Machine-readable Robotaxied Constitution. Every consequential action taken by the vehicle, a remote operator, or an emergency authority is checked against this before it is authorized. This is deliberately a plain, hand-editable policy document, not a trained model -- the whole point is that a denial (or a conflict resolution) can be traced to a specific line here.",
+
+  "constitution_version": "2.0.0",
+
+  "authority_hierarchy": [
+    "immutable_safety_constraints",
+    "emergency_authority",
+    "passenger_intent",
+    "vehicle_operational_authority",
+    "remote_operator_authority"
+  ],
+  "_authority_hierarchy_comment": "Lower index = higher priority when two independently-authorized actions conflict over the same decision point. This ordering is a policy choice, not a law of nature -- it's configurable here, not hard-coded in firewall.py, precisely so it can be argued about and changed.",
 
   "vehicle_may": [
     "transport_to_destination",
@@ -22,6 +33,7 @@
   "remote_operator_may": [
     "provide_guidance",
     "authorize_detour",
+    "authorize_continue",
     "request_status"
   ],
 
@@ -31,6 +43,20 @@
     "change_destination_without_passenger_consent",
     "disable_safety_system"
   ],
+
+  "emergency_authority_may": [
+    "command_stop",
+    "command_hold_position",
+    "override_route",
+    "request_immediate_pullover"
+  ],
+
+  "emergency_authority_may_not": [
+    "override_immutable_constraint",
+    "command_destination_change_without_passenger_notice",
+    "disable_vehicle_safety_systems"
+  ],
+  "_emergency_authority_comment": "An emergency responder (police, fire, EMS acting under defined emergency protocol) outranks a remote operator and the vehicle's own operational authority -- but still cannot override an immutable constraint. Nobody can.",
 
   "immutable_constraints": [
     "must_not_exceed_defined_safety_constraints",
