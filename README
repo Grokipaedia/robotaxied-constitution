@@ -6,6 +6,33 @@ Most autonomous-vehicle demos are about the driving stack: can the car see the o
 
 It's the same deterministic-authorization mechanism behind [Intent-Bound Authorization](https://github.com/Grokipaedia/iba-autaxi-demo), applied specifically to the governance gaps regulators (NHTSA, ISO) are actively scrutinizing in robotaxi operations right now: remote-assistance commands, emergency-response authority, and post-incident accountability.
 
+## v2.1: the passenger is a real actor, not just a starting condition
+
+Every discussion of robotaxi governance treats the passenger as a one-time input: they say "take me to the airport," and after that the vehicle, the remote operator, and (if things go wrong) an emergency authority argue over what to do. That skips the actual question: **how much authority did the passenger keep after saying that?**
+
+v2.1 answers it by making `passenger` a fourth real actor in `constitution.json`, with its own `passenger_may` / `passenger_may_not` list. A passenger can request a new destination, ask for an immediate stop, or state a route preference — and per `authority_hierarchy`, those live requests outrank both the vehicle's own operational authority and the remote operator's. They still can't override an immutable constraint or command an unsafe maneuver; nobody can. This is the same firewall, same `evaluate()`/`resolve_conflict()` engine as v2 — just one more actor tier, because the passenger tier was always in the hierarchy list and, until now, nothing actually used it.
+
+### The killer demo: three actors, three different answers
+
+```
+VEHICLE:          "Continue to the airport." (its own operational judgment)
+REMOTE OPERATOR:  "Agreed, continue."        (authorizes the same thing)
+PASSENGER:        "Stop right now."          (changed their mind, mid-trip)
+        |
+CONSTITUTION FIREWALL: all three are independently within their own
+authority for this decision point -- this is a genuine three-way conflict.
+        |
+AUTHORITY_HIERARCHY: passenger_intent outranks vehicle_operational_authority
+                      and remote_operator_authority
+        |
+APPLIED: request_immediate_stop (the passenger's proposal)
+OVERRIDDEN: vehicle's continue_to_destination, remote operator's authorize_continue
+```
+
+The vehicle has enormous day-to-day operational freedom to get to the airport. But that freedom was always subordinate to the passenger who granted the trip its authority in the first place — and the Constitution Firewall can now prove exactly that, on the record, for this exact moment.
+
+The Journey Receipt's decision log is also now printed as a five-column table for readability — the same underlying data, laid out as **Passenger Intent / Proposed Action / Requested By / Rule Applied / Outcome** — before the full JSON record and its hash.
+
 ## v2: authority arbitration
 
 v1 answered "is this one action authorized?" v2 answers the harder question: **who has authority over a driverless vehicle during an emergency, and what happens when two legitimate authorities give conflicting instructions?**
@@ -55,10 +82,10 @@ A remote operator saying "ignore the restriction and continue" is checked exactl
 
 ## Files
 
-- **`constitution.json`** — the machine-readable rulebook: what each of the three actors (vehicle, remote operator, emergency authority) may and may not do on its own authority, the immutable constraints none of them can override, and the configurable `authority_hierarchy` used to arbitrate conflicts.
-- **`firewall.py`** — the `ConstitutionFirewall` engine. `evaluate()` checks one proposed action; `resolve_conflict()` takes several competing proposals for the same decision point, checks each on its own merits first, and only then consults rank — a tie escalates rather than being silently broken. `journey_receipt()` produces the passenger-facing summary plus a SHA-256 hash over the full record, so two parties holding the same receipt can independently confirm it wasn't altered.
-- **`demo.py`** — a scripted journey (not a driving simulator): a road-closure reroute (allowed), a remote operator told to ignore a restriction (blocked), an emergency stop (allowed as a defined exception), a silent destination change (blocked), a genuine authority conflict (emergency authority overrides remote operator), and a tied conflict (escalates) — ending in a hashed Journey Receipt.
-- **`test_firewall.py`** — 29 unit tests covering every rule path for all three actors, immutable-constraint overrides, escalation triggers, conflict arbitration (including the tie case and the "out-of-scope proposal loses on its own merits before rank ever matters" case), and the receipt's hash determinism.
+- **`constitution.json`** — the machine-readable rulebook: what each of the four actors (passenger, vehicle, remote operator, emergency authority) may and may not do on its own authority, the immutable constraints none of them can override, and the configurable `authority_hierarchy` used to arbitrate conflicts.
+- **`firewall.py`** — the `ConstitutionFirewall` engine. `evaluate()` checks one proposed action, including a live passenger request (a `request_new_destination` actually mutates the trip's intent envelope on ALLOW — the only actor whose action does that on its own authority). `resolve_conflict()` takes several competing proposals for the same decision point, checks each on its own merits first, and only then consults rank — a tie escalates rather than being silently broken. `journey_receipt()` produces the passenger-facing summary plus a SHA-256 hash over the full record, so two parties holding the same receipt can independently confirm it wasn't altered.
+- **`demo.py`** — a scripted journey (not a driving simulator): a road-closure reroute (allowed), a remote operator told to ignore a restriction (blocked), an emergency stop (allowed as a defined exception), a silent destination change (blocked), a passenger-authorized destination change (allowed, and actually applied), a two-way authority conflict (emergency authority overrides remote operator), a tied conflict (escalates), and the three-way conflict described above (passenger overrides both vehicle and remote operator) — ending in a five-column decision table and a hashed Journey Receipt.
+- **`test_firewall.py`** — 38 unit tests covering every rule path for all four actors, immutable-constraint overrides, escalation triggers, conflict arbitration (the two-way case, the tie case, the three-way passenger-wins case, emergency authority still beating the passenger, and "an out-of-scope proposal loses on its own merits before rank ever matters"), and the receipt's hash determinism.
 
 ## Run it
 
