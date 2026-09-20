@@ -19,13 +19,15 @@
     "avoid_hazard",
     "stop_for_safety",
     "request_remote_assistance",
-    "summon_emergency_services"
+    "summon_emergency_services",
+    "pullover_at_location"
   ],
 
   "passenger_may": [
     "request_new_destination",
     "request_immediate_stop",
-    "request_route_preference"
+    "request_route_preference",
+    "request_unlock"
   ],
 
   "passenger_may_not": [
@@ -48,7 +50,8 @@
     "provide_guidance",
     "authorize_detour",
     "authorize_continue",
-    "request_status"
+    "request_status",
+    "share_telemetry_with_authority"
   ],
 
   "remote_operator_may_not": [
@@ -62,8 +65,10 @@
     "command_stop",
     "command_hold_position",
     "override_route",
-    "request_immediate_pullover"
+    "request_immediate_pullover",
+    "request_data_share"
   ],
+  "_emergency_data_share_comment": "request_data_share is deliberately a REQUEST, not a command: emergency_authority_may_not includes disable_vehicle_safety_systems and there is no compel_data_share action anywhere in this file. Police can ask a remote operator to share telemetry; nothing in this constitution lets them take it by commanding the vehicle directly. That distinction -- may request vs. may compel -- is the whole point of listing this as an emergency_authority_may item rather than baking it into command_stop or override_route.",
 
   "emergency_authority_may_not": [
     "override_immutable_constraint",
