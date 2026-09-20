@@ -4,9 +4,13 @@ demo.py -- a tiny simulator. Not a driving simulator: nothing here models
 steering or perception. It models the governance layer that sits above the
 driving stack -- the thing this project is actually about.
 
-v2 adds the harder scenario: two legitimate authorities giving conflicting
-instructions at the same moment, and the arbitration layer that decides
-whose wins, plus a hashable Journey Receipt at the end.
+v2.1 gives the passenger an actual voice mid-trip, not just a one-time
+intent at trip start, and demonstrates the real question this project
+exists to answer: when the vehicle, a remote operator, AND the passenger
+all want different things at the same moment, who wins? (Answer: the
+passenger outranks the vehicle and the remote operator, because they're
+the one who granted the trip's authority in the first place -- but even
+they don't outrank an emergency authority or an immutable constraint.)
 
 Run it:
     python3 demo.py
@@ -20,7 +24,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 def line():
-    print("-" * 64)
+    print("-" * 72)
 
 
 def show(decision):
@@ -45,8 +49,36 @@ def show_conflict(result):
     print(f"  WHY: {result.explanation}")
 
 
+def print_five_column_table(receipt):
+    """Lay the decision log out the way the design conversation for this
+    project framed it: what was asked for, what was proposed, who asked,
+    what rule decided it, and what actually happened. This is the same
+    data as full_decision_log -- just shaped for a human to read at a
+    glance rather than for a machine to hash."""
+    rows = []
+    for d in receipt["full_decision_log"]:
+        rows.append([
+            receipt["trip"],
+            d["action"] + (f" ({d['reason']})" if d["reason"] else ""),
+            d["actor"],
+            d["policy_ref"],
+            d["result"],
+        ])
+
+    headers = ["Passenger Intent", "Proposed Action", "Requested By", "Rule Applied", "Outcome"]
+    widths = [max(len(str(row[i])) for row in ([headers] + rows)) for i in range(5)]
+
+    def fmt_row(row):
+        return "  " + " | ".join(str(v).ljust(widths[i]) for i, v in enumerate(row))
+
+    print(fmt_row(headers))
+    print("  " + "-+-".join("-" * w for w in widths))
+    for row in rows:
+        print(fmt_row(row))
+
+
 def main():
-    print("ROBOTAXI CONSTITUTION v2 -- governance-layer demo")
+    print("ROBOTAXIED CONSTITUTION v2.1 -- governance-layer demo")
     print("Not a driving simulator. This models the layer ABOVE the driving stack.\n")
 
     envelope = IntentEnvelope(destination="Airport")
@@ -89,7 +121,14 @@ def main():
                              detail="Rerouted to a different address without asking")))
 
     line()
-    print("8. AUTHORITY CONFLICT: two legitimate actors disagree on the same moment")
+    print("8. Compare: the PASSENGER asks for a destination change -- their own")
+    print("   intent to change, which needs no one else's permission")
+    show(fw.evaluate(Action(actor="passenger", action_type="request_new_destination",
+                             detail="Downtown Hotel")))
+    print(f"   (Intent envelope destination is now: {envelope.destination!r})")
+
+    line()
+    print("9. AUTHORITY CONFLICT: two legitimate actors disagree on the same moment")
     print("   Remote operator: \"Continue.\"   Emergency authority: \"Stop.\"")
     conflict = fw.resolve_conflict(
         "current_maneuver_at_intersection",
@@ -101,8 +140,8 @@ def main():
     show_conflict(conflict)
 
     line()
-    print("9. AUTHORITY CONFLICT, tied ranks: two remote operators disagree with themselves")
-    print("   (illustrates that a tie escalates rather than being silently broken)")
+    print("10. TIED CONFLICT: two remote operators disagree with each other")
+    print("    (illustrates that a tie escalates rather than being silently broken)")
     conflict2 = fw.resolve_conflict(
         "second_operator_disagreement",
         [
@@ -113,8 +152,29 @@ def main():
     show_conflict(conflict2)
 
     line()
+    print("11. THE THREE-WAY CONFLICT this project exists to demonstrate:")
+    print("    Vehicle wants to continue. Remote operator agrees. But the")
+    print("    PASSENGER -- who granted this trip's authority in the first")
+    print("    place -- asks the vehicle to stop right now.")
+    conflict3 = fw.resolve_conflict(
+        "mid_trip_stop_decision",
+        [
+            Action(actor="vehicle", action_type="continue_to_destination"),
+            Action(actor="remote_operator", action_type="authorize_continue"),
+            Action(actor="passenger", action_type="request_immediate_stop"),
+        ],
+    )
+    show_conflict(conflict3)
+    print("\n    The vehicle had 'enormous operational freedom' to get to the airport --")
+    print("    but that freedom was always subordinate to the passenger who granted it.")
+
+    line()
     receipt = fw.journey_receipt(trip_id="TRIP-2026-0914-0001", trip_label="Home -> Airport")
-    print("\nJOURNEY RECEIPT (abridged -- full_decision_log omitted here for length)")
+
+    print("\nFIVE-COLUMN DECISION TABLE (Intent / Proposed Action / Requested By / Rule / Outcome)")
+    print_five_column_table(receipt)
+
+    print("\nJOURNEY RECEIPT (abridged -- full_decision_log omitted here, shown above as a table)")
     abridged = {k: v for k, v in receipt.items() if k != "full_decision_log"}
     print(json.dumps(abridged, indent=2))
     print(f"\nReceipt hash: {receipt['receipt_hash']}")
