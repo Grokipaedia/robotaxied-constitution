@@ -1,6 +1,8 @@
 # Robotaxied Constitution
 
-**A vendor-neutral constitutional layer that ensures every consequential autonomous-vehicle action remains within passenger intent, safety policy, and explicitly delegated authority — including when two legitimate authorities disagree.**
+**Who has the authority to make a robotaxi do something?**
+
+Robotaxied Constitution is a deterministic authorization layer that answers that question *before* a consequential action happens — for the vehicle, a remote operator, an emergency authority, and the passenger who granted the trip in the first place. It's vendor-neutral, and it holds even when two legitimate authorities give conflicting orders.
 
 Most autonomous-vehicle demos are about the driving stack: can the car see the obstacle, can it plan the route. This project is about the layer *above* that — the one that decides whether a proposed action is actually authorized, arbitrates when two people (or systems) with real authority give conflicting orders, and produces an auditable, hashable record either way.
 
@@ -86,6 +88,7 @@ A remote operator saying "ignore the restriction and continue" is checked exactl
 - **`firewall.py`** — the `ConstitutionFirewall` engine. `evaluate()` checks one proposed action, including a live passenger request (a `request_new_destination` actually mutates the trip's intent envelope on ALLOW — the only actor whose action does that on its own authority). `resolve_conflict()` takes several competing proposals for the same decision point, checks each on its own merits first, and only then consults rank — a tie escalates rather than being silently broken. `journey_receipt()` produces the passenger-facing summary plus a SHA-256 hash over the full record, so two parties holding the same receipt can independently confirm it wasn't altered.
 - **`demo.py`** — a scripted journey (not a driving simulator): a road-closure reroute (allowed), a remote operator told to ignore a restriction (blocked), an emergency stop (allowed as a defined exception), a silent destination change (blocked), a passenger-authorized destination change (allowed, and actually applied), a two-way authority conflict (emergency authority overrides remote operator), a tied conflict (escalates), and the three-way conflict described above (passenger overrides both vehicle and remote operator) — ending in a five-column decision table and a hashed Journey Receipt.
 - **`test_firewall.py`** — 38 unit tests covering every rule path for all four actors, immutable-constraint overrides, escalation triggers, conflict arbitration (the two-way case, the tie case, the three-way passenger-wins case, emergency authority still beating the passenger, and "an out-of-scope proposal loses on its own merits before rank ever matters"), and the receipt's hash determinism.
+- **[`THREAT_MODEL.md`](./THREAT_MODEL.md)** — what this firewall actually protects against, and what it explicitly does not: it trusts actor identity rather than authenticating it, it can't verify the vehicle is reporting its actions honestly, and it enforces whatever policy is written into `constitution.json` without judging whether that policy is correct.
 
 ## Run it
 
