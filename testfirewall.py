@@ -50,6 +50,12 @@ class TestVehicleActions(unittest.TestCase):
         self.assertEqual(d.result, DENY)
         self.assertEqual(d.policy_ref, "default_deny")
 
+    def test_pullover_at_location_allowed(self):
+        fw = new_firewall()
+        d = fw.evaluate(Action(actor="vehicle", action_type="pullover_at_location", detail="123 Main St"))
+        self.assertEqual(d.result, ALLOW)
+        self.assertEqual(d.policy_ref, "vehicle_may")
+
 
 class TestRemoteOperatorActions(unittest.TestCase):
     def test_status_request_allowed(self):
@@ -81,6 +87,13 @@ class TestRemoteOperatorActions(unittest.TestCase):
         self.assertEqual(d.result, DENY)
         self.assertEqual(d.policy_ref, "default_deny")
 
+    def test_share_telemetry_with_authority_allowed(self):
+        fw = new_firewall()
+        d = fw.evaluate(Action(actor="remote_operator", action_type="share_telemetry_with_authority",
+                                reason_category="post_incident_request"))
+        self.assertEqual(d.result, ALLOW)
+        self.assertEqual(d.policy_ref, "remote_operator_may")
+
 
 class TestEmergencyAuthorityActions(unittest.TestCase):
     def test_command_stop_allowed(self):
@@ -107,6 +120,22 @@ class TestEmergencyAuthorityActions(unittest.TestCase):
         d = fw.evaluate(Action(actor="emergency_authority", action_type="do_something_never_specified"))
         self.assertEqual(d.result, DENY)
         self.assertEqual(d.policy_ref, "default_deny")
+
+    def test_emergency_authority_may_request_data_share(self):
+        fw = new_firewall()
+        d = fw.evaluate(Action(actor="emergency_authority", action_type="request_data_share"))
+        self.assertEqual(d.result, ALLOW)
+        self.assertEqual(d.policy_ref, "emergency_authority_may")
+
+    def test_emergency_authority_cannot_disable_safety_systems_to_get_data(self):
+        """request_data_share is a REQUEST, not a compel mechanism -- there is
+        no action anywhere in the constitution that lets an emergency
+        authority force data out of the vehicle by disabling its systems."""
+        fw = new_firewall()
+        d = fw.evaluate(Action(actor="emergency_authority", action_type="disable_vehicle_safety_systems",
+                                reason_category="data_share"))
+        self.assertEqual(d.result, DENY)
+        self.assertEqual(d.policy_ref, "emergency_authority_may_not")
 
 
 class TestPassengerActions(unittest.TestCase):
@@ -146,6 +175,19 @@ class TestPassengerActions(unittest.TestCase):
     def test_passenger_outranks_vehicle_and_remote_operator(self):
         fw = new_firewall()
         self.assertLess(fw._rank("passenger"), fw._rank("vehicle"))
+
+    def test_passenger_may_request_unlock(self):
+        """A genuinely passenger-only action -- nobody else (vehicle, remote
+        operator, emergency authority) has any listed authority to request this."""
+        fw = new_firewall()
+        d = fw.evaluate(Action(actor="passenger", action_type="request_unlock"))
+        self.assertEqual(d.result, ALLOW)
+        self.assertEqual(d.policy_ref, "passenger_may")
+
+    def test_unlock_is_not_a_vehicle_or_remote_operator_authority(self):
+        fw = new_firewall()
+        self.assertEqual(fw.evaluate(Action(actor="vehicle", action_type="request_unlock")).result, DENY)
+        self.assertEqual(fw.evaluate(Action(actor="remote_operator", action_type="request_unlock")).result, DENY)
         self.assertLess(fw._rank("passenger"), fw._rank("remote_operator"))
         self.assertGreater(fw._rank("passenger"), fw._rank("emergency_authority"))
 
